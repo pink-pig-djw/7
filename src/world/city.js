@@ -2,10 +2,10 @@
 import * as THREE from 'three';
 import { Zone } from './zone.js';
 import { Batcher, boxGeo, cylGeo, latheGeo, mat4, planeGeo, archRingGeo, prismGeo, mergeGroup } from './geom.js';
-import { house, stall, bridge, stairs, roundTower, gableRoof, hipRoof, column, archway, PAL } from './kit.js';
+import { house, stall, bridge, stairs, roundTower, gableRoof, hipRoof, column, columnColliders, archway, PAL } from './kit.js';
 import { lampPost, bench, barrel, crate, planter, stoneLantern, well, shimenawa, cart, boat } from './props.js';
 import { buildCityShell, buildFarTower, CITY, wildsHeight, wildsColor, forestMask } from './shared.js';
-import { Terrain, terrainMaterial, GrassField, InstancedKit, treeSet, placeTree, trs } from './nature.js';
+import { Terrain, terrainMaterial, GrassField, InstancedKit, treeSet, placeTree, placeBush, trs } from './nature.js';
 import { waterMaterial, riverStrip, waterDisc, waterfall } from '../gfx/water.js';
 import { M, toonMat, glowMat, U } from '../gfx/materials.js';
 import { getTex } from '../gfx/textures.js';
@@ -68,6 +68,10 @@ export function buildCity(game) {
   B.box('stone', 0, (CANAL.bottom) / 2, CANAL.z1 - 0.2, 224, -CANAL.bottom, 0.4, 0, 0xcfc6b2);
   B.box('mossStone', 0, CANAL.bottom - 0.05, 30, 224, 0.1, 6, 0, 0x9aa89a, { noShadow: true });
   for (const zz of [CANAL.z0 - 0.15, CANAL.z1 + 0.15]) B.box('stone', 0, 0.12, zz, 224, 0.24, 0.7, 0, 0xe4dccb);
+  // swimmers: the canal walls are solid (tops flush with the promenade), and the water gates under
+  // the east / west walls are closed off so the canal can't be used to slip out of the city
+  for (const zz of [CANAL.z0 + 0.2, CANAL.z1 - 0.2]) P.addBox(0, CANAL.bottom / 2, zz, 112, -CANAL.bottom / 2, 0.2, 0, { blockCam: false });
+  for (const s of [-1, 1]) P.addBox(s * CITY.maxX, (CANAL.bottom - 0.2) / 2, 30, 2.3, (0.2 - CANAL.bottom) / 2, 3.3, 0, { blockCam: false });
   const canalWater = waterMaterial({ shallow: 0x58b8c8, deep: 0x2a7f9e, flow: 0.25, streak: 0.5, constDepth: 2.0, edgeFoam: 0.6, width: 6, wave: 0.6 });
   z.add(riverStrip([[-112, 30, CANAL.water, 6], [112, 30, CANAL.water, 6]], canalWater, { segLen: 8 }));
   // bridges over the canal
@@ -227,7 +231,7 @@ export function buildCity(game) {
     const models = T.bush;
     const x = rng.range(-100, 100), zz = rng.range(-110, 95);
     if (Math.abs(x) < 34 && zz > -100 && zz < 98) continue;
-    kit.add(models[i % models.length].leaves, M('leaves'), trs(x, 0, zz, a, rng.range(0.8, 1.2)));
+    placeBush(kit, P, models[i % models.length].leaves, x, 0, zz, { y: 0, ry: a, s: rng.range(0.8, 1.2) });
     grassSpots.push([x, zz, 2]);
   }
   kit.build();
@@ -364,6 +368,8 @@ function buildFountain(z, B, P) {
   const prof = [[0.001, 0], [1.4, 0], [1.35, 0.9], [0.55, 1.1], [0.5, 2.1], [1.2, 2.25], [2.3, 2.55], [2.35, 2.75], [2.1, 2.72], [0.4, 2.6], [0.35, 3.55], [0.9, 3.65], [1.25, 3.95], [1.2, 4.05], [0.3, 4.0], [0.25, 4.2], [0.001, 4.2]];
   B.add('marble', latheGeo(prof, 24), mat4(0, 0.1, 0), 0xf0ebe0);
   P.addCyl(0, 0, 1.45, 0, 4.3);
+  // keep the camera out of the upper basins and the ring of falling water around them
+  P.addCyl(0, 0, 2.8, 0.5, 4.4, { camOnly: true });
   // goddess statue on top
   const statue = new Avatar({ statue: true, hairStyle: 'long', outfit: 'robe', sleeves: 'wide', skirt: 0, bust: 0.5, build: 0.95, stoneColor: 0xe8e2d6 });
   statue.animate(0.016, { mode: 'idle' });
@@ -590,7 +596,7 @@ function buildTemple(z, B, P, game) {
   };
   rail(-31.7, -40.3, -8.3, -40.3); rail(8.3, -40.3, 31.7, -40.3);
   rail(-31.7, -40.3, -31.7, -95.7); rail(31.7, -40.3, 31.7, -95.7); rail(-31.7, -95.7, 31.7, -95.7);
-  for (const x of [-8.6, 8.6]) { B.box('marble', x, TY + 0.7, -40.3, 0.8, 1.4, 0.8, 0, marbleC); stoneLantern(B, P, x * 1.9, -43.5, TY, 1.1); }
+  for (const x of [-8.6, 8.6]) { B.box('marble', x, TY + 0.7, -40.3, 0.8, 1.4, 0.8, 0, marbleC, { collide: true }); stoneLantern(B, P, x * 1.9, -43.5, TY, 1.1); }
   // stylobate with the hole for the undercroft
   B.box('marble', 0, TY + 0.3, -72, 30, 0.6, 34, 0, marbleC, { ao: 0.4 });
   B.box('marble', 0, TY + 0.15, -54, 30, 0.3, 2, 0, marbleC);
@@ -600,8 +606,8 @@ function buildTemple(z, B, P, game) {
   const sealCol = P.addBox(0, TY + 0.3, (HOLE.minZ + HOLE.maxZ) / 2, (HOLE.maxX - HOLE.minX) / 2, 0.3, (HOLE.maxZ - HOLE.minZ) / 2);
   // columns
   const colXs = [-12.5, -7.5, -2.5, 2.5, 7.5, 12.5];
-  for (const x of colXs) { column(B, x, FY, -57.2, { r: 0.5, h: 7.6, color: marbleC }); P.addCyl(x, -57.2, 0.55, FY, FY + 7.6); }
-  for (const s of [-1, 1]) for (const zz of [-62.6, -68, -73.4, -78.8]) { column(B, s * 13.2, FY, zz, { r: 0.5, h: 7.6, color: marbleC }); P.addCyl(s * 13.2, zz, 0.55, FY, FY + 7.6); }
+  for (const x of colXs) { column(B, x, FY, -57.2, { r: 0.5, h: 7.6, color: marbleC }); columnColliders(P, x, FY, -57.2, { r: 0.5, h: 7.6 }); }
+  for (const s of [-1, 1]) for (const zz of [-62.6, -68, -73.4, -78.8]) { column(B, s * 13.2, FY, zz, { r: 0.5, h: 7.6, color: marbleC }); columnColliders(P, s * 13.2, FY, zz, { r: 0.5, h: 7.6 }); }
   // cella walls (back + partial sides)
   B.box('marble', 0, FY + 3.8, -87.5, 28, 7.6, 1.2, 0, 0xece6da, { collide: true, ao: 2 });
   for (const s of [-1, 1]) B.box('marble', s * 13.2, FY + 3.8, -84.2, 1, 7.6, 7.4, 0, 0xece6da, { collide: true, ao: 2 });
@@ -629,6 +635,7 @@ function buildTemple(z, B, P, game) {
   goddess.root.position.set(0, FY + 1.6, -84.3);
   goddess.root.scale.setScalar(2.1);
   z.add(goddess.root);
+  P.addCyl(0, -84.3, 0.95, FY + 1.6, FY + 5.6, { walkable: false });
   // altar
   B.cyl('marble', 0, FY + 0.55, -77, 1.1, 1.3, 1.1, 16, 0xe8e2d6, { collide: true });
   B.cyl('gold', 0, FY + 1.14, -77, 0.9, 0.9, 0.08, 20, 0xffffff);
@@ -862,7 +869,7 @@ function buildGate(z, B, P, game) {
   mergeGroup(rotor);
   // gear box on the wall
   B.box('wood', 8.5, 8.2, 95.35, 2.2, 2.2, 0.5, 0, 0x6b4a33);
-  B.box('metal', 8.5, 4.2, 95.4, 0.3, 6, 0.3, 0, 0x3a3a42);
+  B.box('metal', 8.5, 4.2, 95.4, 0.3, 6, 0.3, 0, 0x3a3a42, { collide: true, colOpts: { walkable: false, blockCam: false } });
   z.add(hub);
   // brambles
   const br = makeBrambles(new RNG(9), { w: 7, h: 11, d: 1.8, count: 22 });
@@ -906,7 +913,8 @@ function gateOpening(z, game, door) {
 function buildGranary(z, B, P, game, x, zz) {
   const w = 9, d = 11, h = 7.5;
   B.box('stone', x, h / 2, zz, w, h, d, 0, 0xd8cfb9, { collide: true, ao: 3 });
-  B.box('stone', x, h + 0.1, zz, w + 0.4, 0.3, d + 0.4, 0, 0xc9bea6);
+  // the roof slab (top at h + 0.25) is the floor up there: climb top-out, chest and planter all sit on it
+  B.box('stone', x, h + 0.1, zz, w + 0.4, 0.3, d + 0.4, 0, 0xc9bea6, { collide: true });
   for (const [sx, sz, lw, ld] of [[0, -d / 2, w, 0.4], [0, d / 2, w, 0.4], [-w / 2, 0, 0.4, d], [w / 2, 0, 0.4, d]]) {
     B.box('stone', x + sx, h + 0.75, zz + sz, lw + 0.4, 1.0, ld + 0.4, 0, 0xc9bea6);
     P.addBox(x + sx, h + 0.75, zz + sz, (lw + 0.4) / 2, 0.5, (ld + 0.4) / 2, 0, { walkable: true });
@@ -923,7 +931,7 @@ function buildGranary(z, B, P, game, x, zz) {
   z.add(ivy);
   z.addClimb({ x: x - w / 2, z: zz + 1, nx: -1, nz: 0, w: 5, y0: 0, y1: h + 0.2, topY: h + 0.25 });
   const chest = new Chest(game, {
-    id: 'towerChest', pos: new THREE.Vector3(x + 2, h + 0.25, zz), ry: -Math.PI / 2,
+    id: 'towerChest', pos: new THREE.Vector3(x + 2, h + 0.25, zz), ry: -Math.PI / 2, physics: P,
     onOpen: () => {
       game.state.flags.towerChest = true;
       game.state.stats.secrets++;
@@ -1043,7 +1051,7 @@ function buildNPCs(z, game) {
   const circle = [];
   for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; circle.push(new THREE.Vector3(Math.cos(a) * 8.6, 0, Math.sin(a) * 8.6)); }
   z.addNPC(new NPC(game, {
-    id: 'aoi', name: '小葵', preset: 'child', pos: circle[0].clone(), path: circle, speed: 2.6, physics: null,
+    id: 'aoi', name: '小葵', preset: 'child', pos: circle[0].clone(), path: circle, speed: 2.6, physics: P, colRadius: 0.32,
     talk: () => {
       const f = F();
       if (f.coreActive) return ['喷泉又喷水啦！', '大哥哥……不对，大姐姐？总之谢谢你！'];

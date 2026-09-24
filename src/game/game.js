@@ -14,6 +14,7 @@ import { Dialogue } from '../ui/dialogue.js';
 import { Menus } from '../ui/menus.js';
 import { clamp, lerp } from '../core/util.js';
 import { afterEnding as warmAfterEnding } from '../world/undercroft.js';
+import { isFullscreen, toggleFullscreen, onFullscreenChange } from '../ui/fullscreen.js';
 
 const _v = new THREE.Vector3();
 const _focus = new THREE.Vector3();
@@ -55,9 +56,17 @@ export class Game {
       this.fx.setScale(h * engine._pr, this.camera.fov);
     };
     engine.resize(true);
+    this.fsEnterT = -1e9;
     this.input.onLockChange = (locked) => {
+      // entering fullscreen can drop the pointer lock; that isn't the player asking for the pause menu
+      if (!locked && performance.now() - this.fsEnterT < 1200) { if (this.mode === 'play' && this.controlEnabled) this.input.requestLock(); return; }
       if (!locked && this.mode === 'play' && !this.dialogue.active && !this.dialogue.itemActive && !this.cam.cinematic && !this.busy) this.pause();
     };
+    this.input.onFullscreenKey = () => toggleFullscreen();
+    onFullscreenChange(() => {
+      if (isFullscreen()) this.fsEnterT = performance.now();
+      this.menus.refreshFullscreen();
+    });
     engine.renderer.domElement.addEventListener('mousedown', () => {
       if (this.mode === 'play' && !this.input.locked) this.input.requestLock();
     });
@@ -120,7 +129,9 @@ export class Game {
     this.audio.setZone(this.mode === 'title' ? 'title' : id);
     this.hud.setZoneLabel(z.name);
     this.state.zone = id;
-    z.onEnter();
+    // the boot-time shader warm-up visits every zone before the save is loaded: no enter logic
+    // then (it would spawn enemies from a blank save and queue zone hints)
+    if (!this.warming) z.onEnter();
   }
 
   travel(id, pos, yaw, { title = true, color = '#000', onArrive = null } = {}) {

@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { Zone } from './zone.js';
 import { Batcher, boxGeo, cylGeo, mat4, planeGeo, mergeGroup, planarUV } from './geom.js';
-import { column, stairs } from './kit.js';
+import { column, columnColliders, stairs } from './kit.js';
 import { M, toonMat, glowMat, U, defineMaterial } from '../gfx/materials.js';
 import { getTex } from '../gfx/textures.js';
 import { Spinner, Door, Interactable, HiddenRune, PushBlock, PressurePlate, RunePedestal, WindDuct, runeTile, crystalObject, makeBeam, glowToon } from '../game/entities.js';
@@ -67,7 +67,7 @@ export function buildUndercroft(game) {
   wall(-12, 4, -3.8, 14.2, H); wall(3.8, 4, 12, 14.2, H);
   for (const s of [-1, 1]) for (let zz = -26; zz <= 0; zz += 6.5) {
     column(B, s * 10.6, 0, zz, { r: 0.55, h: H, color: 0xb0ae9e, mat: 'ruin', fluted: false });
-    P.addCyl(s * 10.6, zz, 0.6, 0, H);
+    columnColliders(P, s * 10.6, 0, zz, { r: 0.55, h: H });
     strip(s * 11.9, 5.5, zz + 3.2, 0.15, 3.5);
   }
   // floor mosaic
@@ -153,8 +153,8 @@ export function buildUndercroft(game) {
   ];
   // braziers
   const brazier = (x, zz) => {
-    B.cyl('ruin', x, 0.55, zz, 0.45, 0.35, 1.1, 8, 0x8a8e84, { collide: true });
-    B.cyl('metal', x, 1.2, zz, 0.6, 0.4, 0.3, 10, 0x4a4a50);
+    B.cyl('ruin', x, 0.55, zz, 0.45, 0.35, 1.1, 8, 0x8a8e84, { collide: true, colOpts: { walkable: false } });
+    B.cyl('metal', x, 1.2, zz, 0.6, 0.4, 0.3, 10, 0x4a4a50, { collide: true, colOpts: { walkable: false } });
     const fl = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 8), glowMat(0x6fe8ff, 2.2));
     fl.position.set(x, 1.5, zz);
     fl.scale.y = 1.4;
@@ -190,7 +190,7 @@ export function buildUndercroft(game) {
   for (let i = 0; i < grid.w; i++) for (let j = 0; j < grid.h; j++) {
     const x = grid.x0 + (i + 0.5) * 2, zz = grid.z0 + (j + 0.5) * 2;
     B.box('ruin', x, 0.04, zz, 1.92, 0.06, 1.92, 0, (i + j) % 2 ? 0xa8a698 : 0x9a988a, { noShadow: true });
-    if (grid.blocked(i, j)) { column(B, x, 0, zz, { r: 0.6, h: 2, color: 0x9a9e94, mat: 'ruin', broken: 0.2 }); P.addCyl(x, zz, 0.75, 0, 1.8); }
+    if (grid.blocked(i, j)) { column(B, x, 0, zz, { r: 0.6, h: 2, color: 0x9a9e94, mat: 'ruin', broken: 0.2 }); columnColliders(P, x, 0, zz, { r: 0.6, h: 2, broken: 0.2 }); }
   }
   // grid outline strips
   strip(0, 0.06, grid.z0 - 0.1, 10.2, 0.12); strip(0, 0.06, grid.z0 + 8.1, 10.2, 0.12);
@@ -218,7 +218,9 @@ export function buildUndercroft(game) {
   fanRotor.add(fanHub);
   mergeGroup(fanRotor);
   z.add(fanG);
-  B.box('ruin', 10.8, 3.2, -52, 0.6, 4.2, 4.2, 0, 0x8a8e84);
+  B.box('ruin', 10.8, 3.2, -52, 0.6, 4.2, 4.2, 0, 0x8a8e84, { collide: true, colOpts: { walkable: false } });
+  // blades + glow ring in front of the housing
+  P.addBox(10.2, 3.2, -52, 0.32, 1.7, 1.7, 0, { walkable: false, blockCam: false });
   const timerRing = new THREE.Mesh(new THREE.RingGeometry(1.75, 1.95, 40), glowMat(0x9ff5e8, 2, { transparent: true, opacity: 0.9, additive: true }));
   timerRing.position.set(fanPos.x - 0.3, fanPos.y, fanPos.z); timerRing.rotation.y = -Math.PI / 2; timerRing.visible = false;
   z.add(timerRing);
@@ -336,6 +338,10 @@ export function buildUndercroft(game) {
     g.add(ring);
     const frame = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4.2, 0.5), stoneM);
     frame.position.set(0, -1.9, -0.4); g.add(frame);
+    // support post + the spinning disc (blades and ring) are solid
+    const sn = Math.sin(facingRy), cs = Math.cos(facingRy);
+    P.addBox(pos.x - 0.4 * sn, pos.y - 1.9, pos.z - 0.4 * cs, 0.28, 2.1, 0.28, facingRy, { walkable: false, blockCam: false });
+    P.addBox(pos.x + 0.05 * sn, pos.y, pos.z + 0.05 * cs, 1.75, 1.75, 0.38, facingRy, { walkable: false, blockCam: false });
     const tRing = new THREE.Mesh(new THREE.RingGeometry(1.9, 2.15, 40), glowMat(0x9ff5e8, 2, { transparent: true, opacity: 0.9, additive: true }));
     tRing.position.z = 0.25; tRing.visible = false;
     g.add(tRing);
@@ -388,6 +394,12 @@ export function buildUndercroft(game) {
   const pipe = new THREE.Mesh(new THREE.TubeGeometry(curve, 30, 0.45, 8, false), toonMat({ color: 0x8a8e84, map: getTex('ruin'), rim: 0.25 }));
   pipe.castShadow = true;
   z.add(pipe);
+  // the low run of the pipe (rising out of the inlet) can be reached from the floor / inlet top
+  for (let k = 1; k <= 8; k++) {
+    const q = curve.getPoint(k * 0.05);
+    if (q.y > 5.5) break;
+    P.addCyl(q.x, q.z, 0.5, q.y - 0.5, q.y + 0.5, { walkable: false, blockCam: false });
+  }
   const duct = new WindDuct(game, { id: 'duct', pos: inlet, path: ductPts, target: T3, radius: 1.4 });
   const ductWind = duct.onWind.bind(duct);
   duct.onWind = (info) => { if (!game.state.flags.ucArena) { game.hud.toast('风道被某种力量封住了……先击败守卫！', 2.4); return false; } return ductWind(info); };
@@ -510,8 +522,9 @@ function buildCore(z, B, P, game) {
   z.add(g);
   B.add('ruin', cylGeo(4.2, 4.8, 0.8, 24), mat4(CORE.x, 0.4, CORE.z), 0xa8a698);
   B.add('ruin', cylGeo(3.2, 3.6, 0.7, 24), mat4(CORE.x, 1.15, CORE.z), 0xb4b2a2);
-  P.addCyl(CORE.x, CORE.z, 3.4, 0, 1.5);
-  P.addCyl(CORE.x, CORE.z, 4.5, 0, 0.8);
+  // the machine's tiers aren't a platform: its glowing rings sweep through the space above them
+  P.addCyl(CORE.x, CORE.z, 3.4, 0, 1.5, { walkable: false });
+  P.addCyl(CORE.x, CORE.z, 4.5, 0, 0.8, { walkable: false });
   const stoneM = toonMat({ color: 0xc8c6b6, map: getTex('ruin'), rim: 0.35, emissive: 0x7fe8d8, emissiveIntensity: 0 });
   const petals = [];
   for (let i = 0; i < 4; i++) {

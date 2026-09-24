@@ -37,7 +37,11 @@ export function bench(B, phys, x, z, ry = 0, y = 0) {
     lb(B, W, 'metal', s * 0.75, 0.22, 0, 0.08, 0.44, 0.45, 0x3a3d44);
     lb(B, W, 'metal', s * 0.75, 0.66, -0.2, 0.08, 0.5, 0.06, 0x3a3d44);
   }
-  if (phys) phys.addBox(x, y + 0.25, z, 0.9, 0.25, 0.27, ry);
+  if (phys) {
+    phys.addBox(x, y + 0.25, z, 0.9, 0.25, 0.27, ry);
+    // backrest (local z = -0.22)
+    phys.addBox(x - Math.sin(ry) * 0.22, y + 0.78, z - Math.cos(ry) * 0.22, 0.9, 0.28, 0.07, ry, { walkable: false, blockCam: false });
+  }
 }
 
 export function barrel(B, phys, x, z, y = 0, color = 0x8a5a36) {
@@ -68,7 +72,8 @@ export function planter(B, phys, x, z, w, d, ry = 0, y = 0, seed = 1) {
     B.add('plain', new THREE.IcosahedronGeometry(r.range(0.14, 0.24), 0), L(W, fx, 0.68 + r.range(0, 0.1), fz), r.chance(0.5) ? 0x4f8f3f : 0x6aa848);
     if (r.chance(0.6)) B.add('plain', new THREE.IcosahedronGeometry(r.range(0.07, 0.1), 0), L(W, fx + r.range(-0.1, 0.1), 0.85 + r.range(0, 0.1), fz + r.range(-0.1, 0.1)), r.pick(PAL.flower));
   }
-  if (phys) phys.addBox(x, y + 0.3, z, w / 2, 0.3, d / 2, ry);
+  // not a platform: the plants would poke through the player's legs
+  if (phys) phys.addBox(x, y + 0.45, z, w / 2, 0.45, d / 2, ry, { walkable: false, blockCam: false });
 }
 
 // Japanese stone lantern (toro)
@@ -136,7 +141,11 @@ export function signpost(zone, x, y, z, ry, boards) {
     g.add(m);
   });
   zone.add(g);
-  if (zone.physics) zone.physics.addCyl(x, z, 0.15, y, y + 2.6, { blockCam: false });
+  if (zone.physics) {
+    zone.physics.addCyl(x, z, 0.15, y, y + 2.6, { blockCam: false });
+    // boards hang at chest-to-head height out to either side of the post
+    zone.physics.addBox(x, y + 1.75, z, 1.32, 0.66, 0.08, ry, { walkable: false, blockCam: false });
+  }
   return g;
 }
 
@@ -180,7 +189,11 @@ export function cart(B, phys, x, z, ry = 0, y = 0) {
     lb(B, W, 'wood', s * 0.4, 0.75, -1.9, 0.08, 0.08, 1.6, 0x6b4a33, { rx: 0.25 });
   }
   for (let i = 0; i < 5; i++) B.add('plain', new THREE.IcosahedronGeometry(0.12, 1), L(W, (i % 3) * 0.3 - 0.3, 1.0, (i - 2) * 0.35), [0xe8453a, 0xf29a2e, 0x8cc84b][i % 3]);
-  if (phys) phys.addBox(x, y + 0.6, z, 0.85, 0.6, 1.3, ry);
+  if (phys) {
+    phys.addBox(x, y + 0.6, z, 0.95, 0.6, 1.3, ry);
+    // shafts sticking out behind (local z -1.1 .. -2.7)
+    phys.addBox(x - Math.sin(ry) * 1.9, y + 0.55, z - Math.cos(ry) * 1.9, 0.48, 0.45, 0.8, ry, { walkable: false, blockCam: false });
+  }
 }
 
 export function boat(B, x, y, z, ry = 0) {

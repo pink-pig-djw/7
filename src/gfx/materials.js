@@ -297,7 +297,9 @@ export function M(name) {
   if (!lib.has(name)) {
     const f = DEFS[name];
     if (!f) throw new Error('unknown material ' + name);
-    lib.set(name, f());
+    const m = f();
+    m.name = name;
+    lib.set(name, m);
   }
   return lib.get(name);
 }

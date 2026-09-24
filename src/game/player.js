@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { Avatar, PRESETS } from './avatar.js';
 import { Body } from './physics.js';
-import { clamp, dampAngle, wrapAngle, lerp, easeOutCubic, easeInOut } from '../core/util.js';
+import { clamp, damp, dampAngle, wrapAngle, lerp, easeOutCubic, easeInOut } from '../core/util.js';
 
 const RUN = 6.2, SPRINT = 9.4, SWIM = 2.8, SWIM_FAST = 4.6;
 const JUMP_V = 8.6;
@@ -26,7 +26,10 @@ export class Player {
     this.body = new Body(null, { radius: 0.36, height: 1.72, stepUp: 0.45, gravity: GRAV });
     this.pos = this.body.pos;
     this.vel = this.body.vel;
-    this.facing = 0;
+    this.facing = 0;     // logical heading (movement, attacks, casts)
+    this.yawVis = 0;     // rendered heading: follows `facing` with a capped turn speed
+    this.turnVel = 0;    // smoothed angular velocity while steering
+    this._sep = {};
     this.state = 'ground';
     this.stateT = 0;
     this.maxHp = 8;
@@ -76,6 +79,8 @@ export class Player {
     this.body.grounded = false;
     this.lastSafe.copy(p);
     this.avatar.resetSecondary();
+    this.yawVis = this.facing;
+    this.turnVel = 0;
     this.root.position.copy(p);
     this.root.rotation.y = this.facing;
   }
@@ -136,6 +141,7 @@ export class Player {
       approachVec(this.vel, 0, 0, 30 * dt);
       if (st !== 'dead') B.move(dt);
     }
+    if (this.state !== 'dead' && this.state !== 'climb' && this.state !== 'mantle') this.separateEnemies();
 
     // water entry
     if (zone && this.state !== 'swim' && this.state !== 'climb' && this.state !== 'mantle' && this.state !== 'dead') {
@@ -191,13 +197,25 @@ export class Player {
     const grounded = B.grounded;
     this.sprinting = ctl && inp.down('sprint') && this.inputMag > 0.1 && !this.exhausted && grounded;
     const target = this.inputMag > 0.1 ? (this.sprinting ? SPRINT : RUN) * this.inputMag : 0;
-    const accel = grounded ? (target > 0 ? 55 : 42) : 15;
-    approachVec(this.vel, this.moveDir.x * target, this.moveDir.z * target, accel * dt);
+    // movement answers the stick immediately (precise on narrow ledges and bridges) ...
+    approachVec(this.vel, this.moveDir.x * target, this.moveDir.z * target, (grounded ? (target > 0 ? 55 : 42) : 15) * dt);
     if (this.inputMag > 0.1) {
+      // ... while the body turns toward it with a capped, smoothed angular speed: quick pivots from a
+      // standstill and on reversals, a steadier sweep when running or sprinting
       const want = Math.atan2(this.moveDir.x, this.moveDir.z);
-      this.turn = clamp(wrapAngle(want - this.facing), -1, 1);
-      this.facing = dampAngle(this.facing, want, grounded ? 15 : 7, dt);
-    } else this.turn *= 0.9;
+      const diff = wrapAngle(want - this.facing);
+      const spd = Math.hypot(this.vel.x, this.vel.z);
+      let maxRate = grounded ? lerp(14, this.sprinting ? 8 : 10, clamp(spd / RUN, 0, 1)) : 6;
+      if (grounded && Math.abs(diff) > 2.3) maxRate = 15;
+      this.turnVel = damp(this.turnVel, clamp(diff * 14, -maxRate, maxRate), 26, dt);
+      let step = this.turnVel * dt;
+      if (Math.abs(step) > Math.abs(diff)) { step = diff; this.turnVel = diff / Math.max(dt, 1e-4); }
+      this.facing = wrapAngle(this.facing + step);
+      this.turn = clamp(this.turnVel / 10, -1, 1);
+    } else {
+      this.turnVel = damp(this.turnVel, 0, 20, dt);
+      this.turn *= 0.9;
+    }
 
     if (grounded) this.coyote = 0.12; else this.coyote -= dt;
     if (ctl && inp.hit('jump')) this.jumpBuf = 0.15; else this.jumpBuf -= dt;
@@ -289,11 +307,13 @@ export class Player {
     const g = this.game;
     if (!g.state.flags.hasRune) { g.hud && g.hud.toast('还没有掌握任何符文'); return; }
     if (this.runeCD > 0) return;
-    // aim: camera forward, with assist toward receivers
+    // aim: camera forward, with a narrow assist toward a receiver / enemy near the aim line
     const dir = g.wind.aim(this.pos, g.cam.forward(_v));
     this.castDir.copy(dir);
     this.facing = Math.atan2(dir.x, dir.z);
     this.castFired = false;
+    // release once the body has visibly turned toward the aim (casting behind takes a moment)
+    this.castFireT = 0.11 + Math.min(0.16, Math.abs(wrapAngle(this.facing - this.yawVis)) / 20);
     this.setState('cast');
     this.runeCD = 0.75;
   }
@@ -302,14 +322,42 @@ export class Player {
     const g = this.game;
     approachVec(this.vel, 0, 0, 40 * dt);
     this.body.move(dt);
-    if (!this.castFired && this.stateT >= 0.11) {
+    if (!this.castFired && this.stateT >= this.castFireT) {
       this.castFired = true;
-      const hand = this.avatar.j.handL;
+      // re-aim at release so the gust follows the camera as it is now
+      const tgt = g.wind.target(this.pos, g.cam.forward(_v));
+      const dir = g.wind.aim(this.pos, _v, tgt);
+      this.castDir.copy(dir);
+      this.facing = Math.atan2(dir.x, dir.z);
+      // chest-level aim line; the gust leaves the hand and converges on it
+      const chest = _t.set(this.pos.x, this.pos.y + 1.3, this.pos.z);
+      const reach = tgt ? Math.max(2, chest.distanceTo(tgt)) : 12;
+      const aimP = chest.addScaledVector(dir, reach);
       this.root.updateMatrixWorld(true);
-      const origin = hand.getWorldPosition(new THREE.Vector3());
-      g.wind.cast(origin, this.castDir, this);
+      const origin = this.avatar.j.handL.getWorldPosition(new THREE.Vector3());
+      const d2 = aimP.clone().sub(origin).normalize();
+      g.wind.cast(origin, d2, this);
     }
-    if (this.stateT >= 0.48) this.setState('ground');
+    if (this.stateT >= this.castFireT + 0.37) this.setState('ground');
+  }
+
+  // Haniwa are solid: push the player out of an overlapping clay body (the enemy takes the rest)
+  separateEnemies() {
+    const zone = this.game.zone;
+    if (!zone) return;
+    for (const e of zone.enemies) {
+      if (!e.alive || !e.body) continue; // wisps are spirits
+      const dx = this.pos.x - e.pos.x, dz = this.pos.z - e.pos.z;
+      const min = this.body.radius + e.body.radius;
+      const d2 = dx * dx + dz * dz;
+      if (d2 >= min * min || Math.abs(this.pos.y - e.pos.y) > 1.4) continue;
+      const d = Math.sqrt(d2);
+      const nx = d > 1e-4 ? dx / d : Math.sin(this.facing + Math.PI), nz = d > 1e-4 ? dz / d : Math.cos(this.facing + Math.PI);
+      const push = min - d;
+      const res = zone.physics.resolveCircle(this.pos.x + nx * push * 0.6, this.pos.z + nz * push * 0.6, this.body.radius, this.pos.y, this.pos.y + this.body.height, this.body.stepUp, this._sep);
+      this.pos.x = res.x; this.pos.z = res.z;
+      e.pos.x -= nx * push * 0.4; e.pos.z -= nz * push * 0.4;
+    }
   }
 
   tryAttachClimb() {
@@ -508,7 +556,10 @@ export class Player {
     if (this.talkMode) st.mode = this.talkMode;
     this.avatar.animate(dt, st);
     this.root.position.copy(this.pos);
-    this.root.rotation.y = this.facing;
+    // instant heading changes (attacks, casts, rolls, facing a speaker) read as a quick pivot
+    const dy = wrapAngle(this.facing - this.yawVis), maxStep = 20 * dt;
+    this.yawVis = wrapAngle(this.yawVis + (Math.abs(dy) <= maxStep ? dy : Math.sign(dy) * maxStep));
+    this.root.rotation.y = this.yawVis;
     // blink visibility while invulnerable
     const vis = !(this.invuln > 0 && this.state !== 'dead' && Math.floor(this.invuln * 14) % 2 === 0 && this.invuln < 0.9);
     this.avatar.inner.visible = vis;

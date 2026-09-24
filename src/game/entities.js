@@ -586,6 +586,15 @@ export class Chest {
     this.object.add(this.lid);
     this.k = 0;
     this.interactRadius = 2.0;
+    // solid body; dynamic so it follows the chest when it rises out of the ground
+    this.physics = o.physics || null;
+    this.col = this.physics ? this.physics.addBox(this.pos.x, this.pos.y + 0.5, this.pos.z, 0.64, 0.5, 0.44, this.object.rotation.y, { dynamic: true, walkable: false }) : null;
+    this.syncCol();
+  }
+  syncCol() {
+    if (!this.col) return;
+    const p = this.object.position;
+    this.physics.moveBox(this.col, p.x, p.y + 0.5, p.z, this.object.rotation.y);
   }
   canInteract() { return !this.opened; }
   prompt() { return '打开宝箱'; }
@@ -599,6 +608,7 @@ export class Chest {
   setOpened() { this.opened = true; this.k = 1; this.lid.rotation.x = -1.9; }
   update(dt) {
     if (this.opened && this.k < 1) { this.k = Math.min(1, this.k + dt * 2); this.lid.rotation.x = -easeOutCubic(this.k) * 1.9; }
+    this.syncCol();
   }
 }
 

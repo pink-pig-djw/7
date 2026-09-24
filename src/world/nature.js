@@ -389,24 +389,16 @@ const TREE_TYPES = {
   golden: { leaf: [0xc9a534, 0xf2dc6a], trunk: 0x6b4a36 },
 };
 
+// lowest foliage / branch height in model units; trees are placed at >= 0.7 scale, so this keeps
+// every canopy above the player's head (1.72 m)
+const CANOPY_MIN = 2.8;
+
 export function makeTreeModel(type = 'round', seed = 1) {
   const rng = new RNG(seed);
   const T = TREE_TYPES[type] || TREE_TYPES.round;
   const trunks = [], leaves = [];
   const H = rng.range(3.0, 4.2);
-  const tg = trunkGeo(H + 0.6, rng.range(0.3, 0.38), 0.16, rng.range(-0.25, 0.25));
-  colorize(tg, (x, y, z, c) => c.set(T.trunk).multiplyScalar(0.8 + (y / H) * 0.3));
-  trunks.push(tg);
-  // branches
-  for (let b = 0; b < 3; b++) {
-    const a = (b / 3) * Math.PI * 2 + rng.range(0, 1);
-    const bl = rng.range(1.2, 1.8);
-    const bg = trunkGeo(bl, 0.1, 0.05, 0, 5);
-    bg.rotateZ(-0.9); bg.rotateY(a);
-    bg.translate(0, H * rng.range(0.55, 0.8), 0);
-    colorize(bg, (x, y, z, c) => c.set(T.trunk));
-    trunks.push(bg);
-  }
+  const r0 = rng.range(0.3, 0.38), bend = rng.range(-0.25, 0.25);
   const center = new THREE.Vector3(0, H + 1.4, 0);
   const n = 5 + rng.int(0, 2);
   const cA = new THREE.Color(T.leaf[0]), cB = new THREE.Color(T.leaf[1]);
@@ -415,31 +407,53 @@ export function makeTreeModel(type = 'round', seed = 1) {
     const rr = i === 0 ? 0 : rng.range(0.9, 1.6);
     const r = i === 0 ? rng.range(1.7, 2.1) : rng.range(1.1, 1.6);
     const cy = center.y + (i === 0 ? 0.5 : rng.range(-0.6, 0.5));
-    const bgeo = blob(r, Math.cos(a) * rr, cy, Math.sin(a) * rr, center, 0.65, 1, 0.2, seed * 31 + i);
-    const tint = rng.range(-0.06, 0.06);
-    colorize(bgeo, (x, y, z, c) => {
+    leaves.push({ geo: blob(r, Math.cos(a) * rr, cy, Math.sin(a) * rr, center, 0.65, 1, 0.2, seed * 31 + i), tint: rng.range(-0.06, 0.06) });
+  }
+  // lift the whole crown (and lengthen the trunk) when a blob hangs below head height
+  let low = Infinity;
+  for (const l of leaves) { const p = l.geo.attributes.position; for (let k = 0; k < p.count; k++) low = Math.min(low, p.getY(k)); }
+  const lift = Math.max(0, CANOPY_MIN - low);
+  center.y += lift;
+  for (const l of leaves) {
+    l.geo.translate(0, lift, 0);
+    colorize(l.geo, (x, y, z, c) => {
       const t = Math.max(0, Math.min(1, (y - (center.y - 2)) / 3.6));
-      c.copy(cA).lerp(cB, t * t).offsetHSL(tint * 0.3, 0, tint);
+      c.copy(cA).lerp(cB, t * t).offsetHSL(l.tint * 0.3, 0, l.tint);
       c.multiplyScalar(0.75 + t * 0.3);
     });
-    leaves.push(bgeo);
   }
-  return { trunk: mergeGeos(trunks), leaves: mergeGeos(leaves), height: H + 3.5, radius: 0.35 };
+  const TH = H + 0.6 + lift;
+  const tg = trunkGeo(TH, r0, 0.16, bend);
+  colorize(tg, (x, y, z, c) => c.set(T.trunk).multiplyScalar(0.8 + (y / TH) * 0.3));
+  trunks.push(tg);
+  // branches spring from above head height and angle up into the crown
+  for (let b = 0; b < 3; b++) {
+    const a = (b / 3) * Math.PI * 2 + rng.range(0, 1);
+    const bl = rng.range(1.2, 1.8);
+    const bg = trunkGeo(bl, 0.1, 0.05, 0, 5);
+    bg.rotateZ(-0.9); bg.rotateY(a);
+    bg.translate(0, Math.max(CANOPY_MIN - 0.3, TH * rng.range(0.62, 0.85)), 0);
+    colorize(bg, (x, y, z, c) => c.set(T.trunk));
+    trunks.push(bg);
+  }
+  return { trunk: mergeGeos(trunks), leaves: mergeGeos(leaves.map((l) => l.geo)), height: TH + 2.9, radius: r0, bend, trunkH: TH, leafLow: low + lift };
 }
 
 export function makeConiferModel(seed = 1) {
   const rng = new RNG(seed);
-  const H = rng.range(7, 10);
+  const H = rng.range(8.2, 10.8);
   const tg = trunkGeo(H, 0.32, 0.12, 0, 7);
   colorize(tg, (x, y, z, c) => c.set(0x5d3f30).multiplyScalar(0.85 + (y / H) * 0.2));
   const tiers = 5;
   const leaves = [];
   const cA = new THREE.Color(0x2f5f3e), cB = new THREE.Color(0x5d9a5a);
+  // the lowest tier's skirt starts at CANOPY_MIN (bare trunk below, like a tall pine)
+  const y0 = CANOPY_MIN + 1.3;
   for (let i = 0; i < tiers; i++) {
     const t = i / (tiers - 1);
     const r = 2.6 * (1 - t * 0.72) + rng.range(-0.1, 0.1);
     const hh = 2.6 - t * 0.8;
-    const y = 2.2 + t * (H - 2.2);
+    const y = y0 + t * (H - y0);
     const g = new THREE.ConeGeometry(r, hh, 9, 2);
     const pos = g.attributes.position;
     const nz = makeNoise2D(seed + i);
@@ -458,7 +472,9 @@ export function makeConiferModel(seed = 1) {
     colorize(g, (x, yy, z, c) => { const q = Math.max(0, Math.min(1, (yy - (y - hh / 2)) / hh)); c.copy(cA).lerp(cB, q * 0.7 + t * 0.3); });
     leaves.push(g);
   }
-  return { trunk: mergeGeos([tg]), leaves: mergeGeos(leaves), height: H + 1, radius: 0.35 };
+  let leafLow = Infinity;
+  for (const g of leaves) { const p = g.attributes.position; for (let k = 0; k < p.count; k++) leafLow = Math.min(leafLow, p.getY(k)); }
+  return { trunk: mergeGeos([tg]), leaves: mergeGeos(leaves), height: H + 1, radius: 0.32, bend: 0, trunkH: H, leafLow };
 }
 
 export function makeBushModel(seed = 1, color = [0x4a8f3a, 0x78b94c], scale = 1) {
@@ -560,7 +576,78 @@ export function placeTree(kit, model, x, y, z, ry, s, physics = null) {
   const m = trs(x, y - 0.15, z, ry, s);
   if (model.trunk) kit.add(model.trunk, M('bark'), m);
   kit.add(model.leaves, M('leaves'), m);
-  if (physics && model.trunk) physics.addCyl(x, z, (model.radius || 0.35) * s, y - 1, y + 3 * s);
+  if (physics && model.trunk) {
+    // follow the trunk's bend at chest height (the bend runs along the model's local x)
+    const ly = 1.0 / s, th = model.trunkH || 4;
+    const off = Math.sin((ly / th) * 2.2) * (model.bend || 0) * s;
+    physics.addCyl(x + Math.cos(ry) * off, z - Math.sin(ry) * off, (model.radius || 0.35) * s + 0.04, y - 1, y - 0.15 + th * s, { walkable: false });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Colliders fitted to instanced models (rocks, bushes). The model's vertices that stand above the
+// ground under them give an ellipse in its local x/z frame, approximated by a "stadium" (two
+// cylinders + a box). With `groundFn` each vertex is measured against the ground right below it,
+// so rocks on slopes keep their full downhill extent.
+const _fv = new THREE.Vector3();
+export function modelFootprint(geo, { x = 0, z = 0, y, groundY, groundFn = null, ry = 0, s, sy = s, band = 1.9, inset = 1 }) {
+  const pos = geo.attributes.position;
+  const c = Math.cos(ry), sn = Math.sin(ry);
+  let ax = 0, az = 0, top = -Infinity, low = Infinity, any = false;
+  for (let i = 0; i < pos.count; i++) {
+    _fv.fromBufferAttribute(pos, i);
+    const wy = y + _fv.y * sy;
+    if (wy > top) top = wy;
+    const g = groundFn ? groundFn(x + (_fv.x * c + _fv.z * sn) * s, z + (-_fv.x * sn + _fv.z * c) * s) : groundY;
+    if (wy < g + 0.1 || wy > g + band) continue;
+    any = true;
+    if (g < low) low = g;
+    ax = Math.max(ax, Math.abs(_fv.x) * s);
+    az = Math.max(az, Math.abs(_fv.z) * s);
+  }
+  if (!any) return null;
+  return { a: ax * inset, b: az * inset, top, low };
+}
+
+export function addEllipseCollider(P, x, z, a, b, ry, bottom, top, opts = {}) {
+  const major = Math.max(a, b), minor = Math.min(a, b);
+  if (major - minor < Math.max(0.15, major * 0.12)) { P.addCyl(x, z, (a + b) / 2, bottom, top, opts); return; }
+  // unit vector of the major axis (model local x -> world (cos, -sin), local z -> (sin, cos))
+  const c = Math.cos(ry), s = Math.sin(ry);
+  const ux = a >= b ? c : s, uz = a >= b ? -s : c;
+  const off = major - minor;
+  P.addCyl(x + ux * off, z + uz * off, minor, bottom, top, opts);
+  P.addCyl(x - ux * off, z - uz * off, minor, bottom, top, opts);
+  P.addBox(x, (bottom + top) / 2, z, a >= b ? off : minor, (top - bottom) / 2, a >= b ? minor : off, ry, opts);
+}
+
+// place a rock with a collider matching its visible footprint; low rocks become steps
+export function placeRock(kit, P, geo, x, groundY, z, { y = groundY, ry = 0, s = 1, sy = s, rx = 0, rz = 0, cast = true, inset = 0.93, walkable = true, groundFn = null } = {}) {
+  if (kit) kit.add(geo, M('rock'), trs(x, y, z, ry, s, rx, rz, sy), { cast });
+  if (!P) return;
+  const f = modelFootprint(geo, { x, z, y, groundY, groundFn, ry, s, sy, inset });
+  if (!f || f.top < f.low + 0.12) return;
+  // only rocks taller than the player's shoulders stop the camera
+  addEllipseCollider(P, x, z, f.a, f.b, ry, f.low - 1.5, f.top - 0.04, { walkable, blockCam: f.top - groundY > 1.3 });
+}
+
+// bushes are solid (a little smaller than the foliage so the leaves brush the player)
+export function placeBush(kit, P, geo, x, groundY, z, { y = groundY - 0.1, ry = 0, s = 1, groundFn = null } = {}) {
+  kit.add(geo, M('leaves'), trs(x, y, z, ry, s));
+  if (!P) return;
+  const f = modelFootprint(geo, { x, z, y, groundY, groundFn, ry, s, inset: 0.86 });
+  if (!f || f.top < f.low + 0.35) return;
+  addEllipseCollider(P, x, z, f.a, f.b, ry, f.low - 1, f.top, { walkable: false, blockCam: false });
+}
+
+// on slopes the uphill side of a crown can hang down to head height: such spots get no tree
+export function canopyClear(model, heightFn, x, y, z, s) {
+  const low = y - 0.15 + (model.leafLow || CANOPY_MIN) * s;
+  for (let k = 0; k < 8; k++) {
+    const a = (k * Math.PI) / 4;
+    for (const r of [1.2 * s, 2.4 * s]) if (heightFn(x + Math.cos(a) * r, z + Math.sin(a) * r) + 1.9 > low) return false;
+  }
+  return true;
 }
 
 // flower heads (instanced small star shapes) scattered via a mask

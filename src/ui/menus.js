@@ -1,5 +1,6 @@
 // Title / pause / help / settings / ending overlays.
 import { saveSettings } from '../game/state.js';
+import { fullscreenAvailable, isFullscreen, toggleFullscreen } from './fullscreen.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -24,6 +25,16 @@ export class Menus {
     $('p-title').onclick = () => { click(); game.toTitle(); };
     $('e-continue').onclick = () => { click(); game.afterEnding(); };
     $('e-title').onclick = () => { click(); game.toTitle(); };
+    for (const id of ['btn-fullscreen', 'p-fullscreen']) $(id).onclick = () => { click(); toggleFullscreen(); };
+    $('set-fullscreen').querySelectorAll('button').forEach((b) => {
+      b.onclick = () => { click(); if ((b.dataset.v === '1') !== isFullscreen()) toggleFullscreen(); };
+    });
+    // hide the controls where the page can't go fullscreen (e.g. an embedding frame without permission)
+    if (!fullscreenAvailable()) {
+      document.querySelectorAll('.fs-btn').forEach((b) => b.classList.add('hidden'));
+      $('set-fullscreen').closest('.set-row').classList.add('hidden');
+    }
+    this.refreshFullscreen();
     document.querySelectorAll('[data-close]').forEach((b) => {
       b.onclick = () => { click(); this.close(b.dataset.close); };
     });
@@ -80,7 +91,14 @@ export class Menus {
     $('set-sfx').oninput = (e) => { g.settings.sfx = parseFloat(e.target.value); this.applySettings(); };
   }
 
+  refreshFullscreen() {
+    const fs = isFullscreen();
+    document.querySelectorAll('.fs-btn').forEach((b) => { b.textContent = fs ? '退出全屏' : '全屏模式'; });
+    $('set-fullscreen').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === (fs ? '1' : '0')));
+  }
+
   refreshSettings() {
+    this.refreshFullscreen();
     const s = this.game.settings;
     const mark = (id, val) => $(id).querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === String(val)));
     mark('set-quality', s.quality);

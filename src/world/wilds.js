@@ -2,13 +2,13 @@
 import * as THREE from 'three';
 import { Zone } from './zone.js';
 import { Batcher, boxGeo, cylGeo, latheGeo, mat4, planeGeo, archRingGeo, mergeGroup, planarUV } from './geom.js';
-import { house, stairs, roundTower, column, gableRoof, hipRoof, PAL } from './kit.js';
+import { house, stairs, roundTower, column, columnColliders, gableRoof, hipRoof, PAL } from './kit.js';
 import { fence, signpost, stoneLantern, crate, barrel, shimenawa } from './props.js';
 import {
   wildsHeight, wildsColor, wildsWater, wildsGrass, buildGrassGrid, forestMask, buildCityShell, buildCitySkyline, buildFarTower,
   RIVER_CTRL, CITY, CITY_OUT, MOAT_Y, RUINS, RIM_Y, BRIDGE_X, CAVE, TOWER_FAR, PLATEAU, ROAD_MAIN, ROAD_WEST, rectDist, riverAttr, RIVER, FALLS_X0, FALLS_X1,
 } from './shared.js';
-import { Terrain, terrainMaterial, GrassField, InstancedKit, treeSet, placeTree, trs, makeFlowerGeo, makeRockModel } from './nature.js';
+import { Terrain, terrainMaterial, GrassField, InstancedKit, treeSet, placeTree, placeRock, placeBush, canopyClear, modelFootprint, addEllipseCollider, trs, makeFlowerGeo, makeRockModel } from './nature.js';
 import { waterMaterial, riverStrip, waterRect, waterfall } from '../gfx/water.js';
 import { M, toonMat, glowMat, U } from '../gfx/materials.js';
 import { getTex } from '../gfx/textures.js';
@@ -60,8 +60,11 @@ export function buildWilds(game) {
     const x = -61 + Math.sin(i * 1.7) * 1.2, zz = 264 + t * 16;
     const rc = RIVER.near(x, zz, 20, {});
     const wy = rc ? riverAttr(rc.s).y : -12;
-    SB.add('rock', makeRockModel(40 + i, { flat: 0.35, color: 0xa3a292 }).geo, mat4(x, wy + 0.05, zz, 0, i, 0, 0.9, 0.9, 0.9), 0xffffff);
-    P.addCyl(x, zz, 0.85, wy - 2, wy + 0.3);
+    const rm = makeRockModel(40 + i, { flat: 0.35, color: 0xa3a292 }).geo;
+    SB.add('rock', rm, mat4(x, wy + 0.05, zz, 0, i, 0, 0.9, 0.9, 0.9), 0xffffff);
+    const bed = terrain.height(x, zz);
+    const f = modelFootprint(rm, { y: wy + 0.05, groundY: bed, s: 0.9, inset: 0.95 });
+    if (f) addEllipseCollider(P, x, zz, f.a, f.b, i, bed - 1, f.top - 0.03);
   }
 
   // -------------------------------------------------------------------------
@@ -157,25 +160,27 @@ export function buildWilds(game) {
     if (f > 0.25) type = r < 0.38 ? 'conifer' : r < 0.9 ? 'round' : r < 0.95 ? 'golden' : 'maple';
     else type = r < 0.6 ? 'round' : r < 0.75 ? 'golden' : r < 0.85 ? 'maple' : 'conifer';
     if (rectDist(x, zz, PLATEAU) < 0 && rng.chance(0.4)) type = rng.chance(0.5) ? 'sakura' : 'maple';
-    const models = T[type];
-    placeTree(kit, models[i % models.length], x, y, zz, rng.range(0, 6.28), rng.range(0.8, 1.25), outside ? null : P);
+    const model = T[type][i % T[type].length];
+    const ry = rng.range(0, 6.28), s = rng.range(0.8, 1.25);
+    // every tree is solid (the map edge is walkable too); in the play area a crown that would
+    // hang into the head space of an uphill slope means no tree on that spot
+    if (outside || canopyClear(model, H, x, y, zz, s)) placeTree(kit, model, x, y, zz, ry, s, P);
     placed++;
     if (rng.chance(0.5)) {
       const bx = x + rng.range(-4, 4), bz = zz + rng.range(-4, 4);
-      if (!blocked(bx, bz)) kit.add(T.bush[i % 3].leaves, M('leaves'), trs(bx, H(bx, bz) - 0.1, bz, rng.range(0, 6), rng.range(0.7, 1.3)));
+      if (!blocked(bx, bz)) placeBush(kit, P, T.bush[i % 3].leaves, bx, H(bx, bz), bz, { ry: rng.range(0, 6), s: rng.range(0.7, 1.3), groundFn: H });
     }
   }
-  // extra bushes & rocks in the open
+  // extra bushes & rocks in the open (every one is solid, sized from its mesh)
   for (let i = 0; i < 380; i++) {
     const x = rng.range(-195, 200), zz = rng.range(120, 470);
     if (blocked(x, zz)) continue;
     const y = H(x, zz);
     if (y > 25) continue;
-    if (rng.chance(0.55)) kit.add(T.bush[i % 3].leaves, M('leaves'), trs(x, y - 0.1, zz, rng.range(0, 6), rng.range(0.7, 1.4)));
+    if (rng.chance(0.55)) placeBush(kit, P, T.bush[i % 3].leaves, x, y, zz, { ry: rng.range(0, 6), s: rng.range(0.7, 1.4), groundFn: H });
     else {
       const s = rng.range(0.5, 2.4);
-      kit.add(T.rock[i % 3].geo, M('rock'), trs(x, y - 0.25 * s, zz, rng.range(0, 6), s));
-      if (s > 1.2) P.addCyl(x, zz, s * 0.85, y - 1, y + s * 0.5);
+      placeRock(kit, P, T.rock[i % 3].geo, x, y, zz, { y: y - 0.25 * s, ry: rng.range(0, 6), s, groundFn: H });
     }
   }
   // big boulders along the gorge rim & plateau cliff
@@ -185,8 +190,7 @@ export function buildWilds(game) {
     if (!rc || rc.d < 12 || rc.d > 18) continue;
     if (Math.abs(x - BRIDGE_X) < 16) continue;
     const y = H(x, zz), s = rng.range(1.2, 2.6);
-    kit.add(T.rock[i % 3].geo, M('rock'), trs(x, y - 0.3 * s, zz, rng.range(0, 6), s));
-    P.addCyl(x, zz, s * 0.9, y - 1, y + s * 0.6);
+    placeRock(kit, P, T.rock[i % 3].geo, x, y, zz, { y: y - 0.3 * s, ry: rng.range(0, 6), s, groundFn: H });
   }
   kit.build();
   SB.build(z.scene);
@@ -373,13 +377,18 @@ function buildFarm(z, B, P, game, H, rng) {
       const x = cx - 2 + k * 1.3;
       const yy = H(x, zz);
       B.add('leaves_farm', new THREE.IcosahedronGeometry(0.35, 0), mat4(x, yy + 0.25, zz, 0, k, 0, 1, 0.7, 1), i % 2 ? 0x8cc84b : 0x6aa840);
+      // the rows stay walkable between them (0.9 m aisles)
+      P.addCyl(x, zz, 0.3, yy - 0.5, yy + 0.5, { walkable: false, blockCam: false });
     }
   }
-  for (const [x, zz] of [[cx + 8, cz - 4], [cx + 9.3, cz - 3]]) { const yy = H(x, zz); B.add('plain', cylGeo(0.7, 0.7, 1.1, 10), mat4(x, yy + 0.55, zz, Math.PI / 2, 0.4, 0), 0xe0c070); P.addCyl(x, zz, 0.7, yy, yy + 1.1); }
+  // hay bales lying on their side: the round face is the footprint along the bale's axis
+  for (const [x, zz] of [[cx + 8, cz - 4], [cx + 9.3, cz - 3]]) { const yy = H(x, zz); B.add('plain', cylGeo(0.7, 0.7, 1.1, 10), mat4(x, yy + 0.55, zz, Math.PI / 2, 0.4, 0), 0xe0c070); P.addBox(x, yy + 0.55, zz, 0.72, 0.62, 0.57, 0.4); }
   // scarecrow
   const sy = H(cx + 2, cz + 9);
   B.box('wood', cx + 2, sy + 1.1, cz + 9, 0.12, 2.2, 0.12, 0, 0x7a5236);
   B.box('wood', cx + 2, sy + 1.6, cz + 9, 1.6, 0.1, 0.1, 0, 0x7a5236);
+  P.addCyl(cx + 2, cz + 9, 0.22, sy - 0.5, sy + 2.6, { walkable: false, blockCam: false });
+  P.addBox(cx + 2, sy + 1.6, cz + 9, 0.82, 0.12, 0.1, 0, { walkable: false, blockCam: false });
   B.add('plain', new THREE.SphereGeometry(0.25, 8, 6), mat4(cx + 2, sy + 2.3, cz + 9), 0xe8d8a8);
   B.add('plain', new THREE.ConeGeometry(0.45, 0.3, 10), mat4(cx + 2, sy + 2.55, cz + 9), 0xe0c070);
   barrel(B, P, cx - 1.5, cz - 6.5, H(cx - 1.5, cz - 6.5));
@@ -415,6 +424,8 @@ function buildShrine(z, B, P, game, H) {
   B.box('stone', x, y + 0.3, zz, 2.2, 0.6, 2.0, 0, 0xc8c4b4, { collide: true });
   B.box('wood', x, y + 1.2, zz, 1.4, 1.2, 1.2, 0, 0x8a5e3c, { collide: true });
   gableRoof(B, mat4(x, y, zz), 1.6, 1.6, 1.8, { pitch: 0.7, axis: 'x', roofColor: 0x4a4a52, gable: 0x8a5e3c });
+  // the eaves overhang the stone base at head height on the downhill side
+  P.addBox(x, y + 2.05, zz, 1.3, 0.4, 1.45, 0, { walkable: false, blockCam: false });
   B.box('plain', x, y + 1.2, zz + 0.61, 0.8, 0.9, 0.02, 0, 0xf2e6c8);
   stoneLantern(B, P, x - 2.2, zz + 1.8, H(x - 2.2, zz + 1.8), 0.8);
   stoneLantern(B, P, x + 2.2, zz + 1.8, H(x + 2.2, zz + 1.8), 0.8);
@@ -449,7 +460,7 @@ function buildBrokenBridge(z, B, P, game, H) {
     }
     // pier down into the gorge
     const pz = broken < 0 ? z1 - 1.5 : z0 + 1.5;
-    B.box('stone', X, (Y - 0.7 + -33) / 2, pz, 3.6, (Y - 0.7) + 33, 3.2, 0, 0xc4bca8, { ao: 10 });
+    B.box('stone', X, (Y - 0.7 + -33) / 2, pz, 3.6, (Y - 0.7) + 33, 3.2, 0, 0xc4bca8, { ao: 10, collide: true });
     // jagged broken edge
     const ez = broken < 0 ? z1 : z0;
     for (let i = 0; i < 5; i++) B.box('stone', X - 2 + i, Y - 0.35 - (i % 2) * 0.3, ez + broken * (0.3 + (i % 3) * 0.25), 0.9, 0.7, 0.8, 0.3 * i, stone);
@@ -493,18 +504,27 @@ function buildBrokenBridge(z, B, P, game, H) {
 function buildRuins(z, B, P, game, H, rng) {
   const { x: CX, z: CZ, y: CY, r: R } = RUINS;
   const stone = 0xc9c7b6;
+  const columnCollider = (x, y, zz, r, h, broken = 0) => columnColliders(P, x, y, zz, { r, h, broken });
   // circular platform
   B.add('ruin', cylGeo(R, R + 0.8, 5.2, 48), mat4(CX, CY - 2.6, CZ), stone, { ao: 3 });
   B.add('flag', planarUV(new THREE.CircleGeometry(R - 0.2, 48).rotateX(-Math.PI / 2)), mat4(CX, CY + 0.012, CZ), 0xdcd8c8, { noShadow: true });
   B.add('ruin', new THREE.TorusGeometry(R - 0.1, 0.3, 6, 64), mat4(CX, CY + 0.1, CZ, Math.PI / 2), 0xb8b6a4);
   P.addCyl(CX, CZ, R, CY - 6, CY);
+  // the platform wall flares out toward its foot
+  P.addCyl(CX, CZ, R + 0.55, CY - 6, CY - 2.4, { walkable: false });
+  // the low curb around the rim can be stepped onto
+  const nRim = 48;
+  for (let i = 0; i < nRim; i++) {
+    const a = (i / nRim) * Math.PI * 2;
+    P.addBox(CX + Math.cos(a) * (R - 0.1), CY + 0.2, CZ + Math.sin(a) * (R - 0.1), 0.3, 0.2, (Math.PI * (R - 0.1)) / nRim + 0.05, -a, { blockCam: false });
+  }
   // grand stairs on the north side (climbing toward +z)
   stairs(B, P, { x: 125, z: 349.6, ry: Math.PI, y0: -5, w: 8, steps: 18, rise: 0.25, run: 0.5, mat: 'ruin', color: 0xd0cebe });
   // torii-like stone gate
   const gx = 125, gz = 359.6;
   for (const s of [-1, 1]) {
     column(B, gx + s * 4.6, CY, gz, { r: 0.55, h: 7, color: 0xcfcdbd, mat: 'ruin', fluted: false });
-    P.addCyl(gx + s * 4.6, gz, 0.6, CY, CY + 7);
+    columnCollider(gx + s * 4.6, CY, gz, 0.55, 7);
   }
   B.box('ruin', gx, CY + 7.3, gz, 12.4, 0.6, 1.1, 0, 0xc4c2b0);
   B.box('ruin', gx, CY + 6.2, gz, 10.2, 0.45, 0.7, 0, 0xc4c2b0);
@@ -517,7 +537,7 @@ function buildRuins(z, B, P, game, H, rng) {
   const mistGroup = new THREE.Group();
   mistGroup.add(mist);
   z.add(mistGroup);
-  const mistCol = P.addBox(gx, CY + 3, gz - 0.6, 4.6, 3.5, 1.4, 0, { blockCam: false });
+  const mistCol = P.addBox(gx, CY + 3, gz - 0.6, 4.6, 3.5, 1.4, 0, { blockCam: false, walkable: false });
   const barrier = new Barrier(game, {
     id: 'ruinsBarrier', object: mistGroup, pos: new THREE.Vector3(gx, CY + 2.5, gz - 1), radius: 4.5, extent: 8, hits: 1, colliders: [mistCol], kind: 'mist',
     onDispel: () => {
@@ -538,10 +558,13 @@ function buildRuins(z, B, P, game, H, rng) {
     if (Math.hypot(x - 150, zz - 392) < 7) continue;
     const broken = rng.chance(0.6) ? rng.range(0.2, 0.7) : 0;
     column(B, x, CY, zz, { r: 0.5, h: 6, color: 0xd0cebe, mat: 'ruin', broken });
-    P.addCyl(x, zz, 0.6, CY, CY + 6);
+    columnCollider(x, CY, zz, 0.5, 6, broken);
     if (broken && rng.chance(0.6)) {
       const fa = rng.range(0, 6.28);
-      B.add('ruin', cylGeo(0.46, 0.46, 2.4, 12), mat4(x + Math.cos(fa) * 2.2, CY + 0.46, zz + Math.sin(fa) * 2.2, Math.PI / 2, fa, 0), 0xc8c6b4);
+      const fx = x + Math.cos(fa) * 2.2, fz = zz + Math.sin(fa) * 2.2;
+      B.add('ruin', cylGeo(0.46, 0.46, 2.4, 12), mat4(fx, CY + 0.46, fz, Math.PI / 2, fa, 0), 0xc8c6b4);
+      // lying drum: its axis runs along (sin fa, cos fa)
+      P.addBox(fx, CY + 0.46, fz, 0.46, 0.46, 1.2, fa);
     }
   }
   // glowing floor runes (brighten as pillars wake)
@@ -650,10 +673,12 @@ function buildRuins(z, B, P, game, H, rng) {
   // --- upper terrace with ivy (pillar B on top)
   const TX = 130, TZ = 405, TW = 14, TD = 9, TH = 5;
   B.box('ruin', TX, CY + TH / 2, TZ, TW, TH, TD, 0, 0xc4c2b0, { collide: true, ao: 3 });
-  B.box('ruin', TX, CY + TH + 0.15, TZ, TW + 0.6, 0.3, TD + 0.6, 0, 0xb8b6a4);
+  // the capstone slab is what you stand on (pillar, statue and the climb top-out all sit on it)
+  B.box('ruin', TX, CY + TH + 0.15, TZ, TW + 0.6, 0.3, TD + 0.6, 0, 0xb8b6a4, { collide: true });
   for (const [dx, dz] of [[-6, -3.5], [6, -3.5], [-6, 3.5], [6, 3.5]]) {
-    column(B, TX + dx, CY + TH, TZ + dz, { r: 0.4, h: 4.5, color: 0xd0cebe, mat: 'ruin', broken: rng.chance(0.5) ? 0.4 : 0 });
-    P.addCyl(TX + dx, TZ + dz, 0.5, CY + TH, CY + TH + 4.5);
+    const broken = rng.chance(0.5) ? 0.4 : 0;
+    column(B, TX + dx, CY + TH, TZ + dz, { r: 0.4, h: 4.5, color: 0xd0cebe, mat: 'ruin', broken });
+    columnCollider(TX + dx, CY + TH, TZ + dz, 0.4, 4.5, broken);
   }
   const ivy = new THREE.Mesh(planeGeo(6, TH - 0.1), M('ivy'));
   ivy.position.set(TX, CY + TH / 2, TZ - TD / 2 - 0.06);
@@ -668,6 +693,7 @@ function buildRuins(z, B, P, game, H, rng) {
   statue.root.scale.setScalar(1.3);
   statue.root.rotation.y = Math.PI;
   z.add(statue.root);
+  P.addCyl(TX - 3.5, TZ + 1, 0.55, CY + TH + 0.3, CY + TH + 2.7, { walkable: false });
 
   // --- shrine with the sealed door (pillar C inside)
   const SX = 150.5, SZ = 392, SW = 7, SD = 7, SH = 5;
@@ -701,7 +727,7 @@ function buildRuins(z, B, P, game, H, rng) {
   for (let i = 0; i < grid.w; i++) for (let j = 0; j < grid.h; j++) {
     const x = grid.x0 + (i + 0.5) * 2, zz = grid.z0 + (j + 0.5) * 2;
     B.box('ruin', x, CY + 0.03, zz, 1.9, 0.06, 1.9, 0, (i + j) % 2 ? 0xc8c6b6 : 0xbdbbaa, { noShadow: true });
-    if (grid.blocked(i, j)) { column(B, x, CY, zz, { r: 0.55, h: 2.4, color: 0xc8c6b4, mat: 'ruin', broken: 0.3 }); P.addCyl(x, zz, 0.7, CY, CY + 1.8); }
+    if (grid.blocked(i, j)) { column(B, x, CY, zz, { r: 0.55, h: 2.4, color: 0xc8c6b4, mat: 'ruin', broken: 0.3 }); columnCollider(x, CY, zz, 0.55, 2.4, 0.3); }
   }
   const block = new PushBlock(game, { id: 'ruinsBlock', grid, i: 0, j: 0, physics: P });
   z.addEntity(block);
@@ -820,8 +846,8 @@ function buildCave(z, B, P, game, H, rng) {
     const r = 8.5;
     const x = cx + Math.cos(a) * r, zz = cz + Math.sin(a) * r;
     const s = rng.range(2.6, 3.4);
-    kit.add(T.rock[i % 3].geo, M('rock'), trs(x, fy + s * 0.4, zz, a, s, 0, 0, s * 1.4));
-    P.addCyl(x, zz, s * 0.95, fy - 2, fy + 8);
+    // wall stones: collider fitted to the mesh (the old circle let the player sink into their inner faces)
+    placeRock(kit, P, T.rock[i % 3].geo, x, H(x, zz), zz, { y: fy + s * 0.4, ry: a, s, sy: s * 1.4, inset: 0.96, walkable: false, groundFn: H });
   }
   // roof slabs
   for (let i = 0; i < 5; i++) {
@@ -854,6 +880,7 @@ function buildCave(z, B, P, game, H, rng) {
     const s = rng.range(0.6, 1.3);
     const st = new THREE.Mesh(new THREE.CylinderGeometry(0.05 * s, 0.07 * s, 0.35 * s, 6), stem); st.position.set(x, y + 0.17 * s, zz); zAdd(st);
     const cap = new THREE.Mesh(new THREE.SphereGeometry(0.2 * s, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), mush); cap.position.set(x, y + 0.33 * s, zz); zAdd(cap);
+    P.addCyl(x, zz, 0.2 * s, y - 0.3, y + 0.53 * s, { walkable: false, blockCam: false });
   }
   const crystalM = toonMat({ color: 0xa8c8ff, emissive: 0x6a8ae8, emissiveIntensity: 1.2, rim: 0.8 });
   for (let i = 0; i < 6; i++) {
@@ -863,13 +890,14 @@ function buildCave(z, B, P, game, H, rng) {
     c.position.set(cx + Math.cos(a) * r, H(cx + Math.cos(a) * r, cz + Math.sin(a) * r) + 0.5, cz + Math.sin(a) * r);
     c.rotation.z = rng.range(-0.4, 0.4);
     zAdd(c);
+    P.addCyl(c.position.x, c.position.z, 0.34, c.position.y - 0.8, c.position.y + 0.62, { walkable: false, blockCam: false });
   }
   z.add(mergeGroup(deco));
   // hidden rune on the back wall -> a stone chest rises
   const backA = -Math.PI * 0.3 + Math.PI;
   const rx = cx + Math.cos(backA) * 6.2, rz = cz + Math.sin(backA) * 6.2;
   const chest = new Chest(game, {
-    id: 'caveChest', pos: new THREE.Vector3(cx, fy - 1.4, cz), ry: -Math.PI * 0.3 - Math.PI / 2,
+    id: 'caveChest', pos: new THREE.Vector3(cx, fy - 1.4, cz), ry: -Math.PI * 0.3 - Math.PI / 2, physics: P,
     onOpen: () => {
       game.state.flags.caveChest = true;
       game.state.stats.secrets++;

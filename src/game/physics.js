@@ -23,6 +23,8 @@ export class Physics {
     c.enabled = opts.enabled !== undefined ? opts.enabled : true;
     c.walkable = opts.walkable !== undefined ? opts.walkable : true;
     c.blockCam = opts.blockCam !== undefined ? opts.blockCam : true;
+    // camera-only volume (water curtains, overhangs): stops the camera, invisible to bodies
+    c.camOnly = !!opts.camOnly;
     c.tag = opts.tag || null;
     c.data = opts.data || null;
     c.dynamic = !!opts.dynamic;
@@ -137,7 +139,7 @@ export class Physics {
     const lim = footY + stepUp;
     const cs = this.query(x - 0.05, z - 0.05, x + 0.05, z + 0.05);
     for (const c of cs) {
-      if (!c.walkable) continue;
+      if (!c.walkable || c.camOnly) continue;
       const s = this.surfaceAt(c, x, z);
       if (s > h && s <= lim) { h = s; hc = c; }
     }
@@ -150,6 +152,7 @@ export class Physics {
     let m = Infinity;
     const cs = this.query(x - 0.05, z - 0.05, x + 0.05, z + 0.05);
     for (const c of cs) {
+      if (c.camOnly) continue;
       if (c.bottom >= fromY && c.bottom < m && this.surfaceAt(c, x, z) > -Infinity) m = c.bottom;
     }
     return m;
@@ -162,13 +165,14 @@ export class Physics {
       const cs = this.query(x - r, z - r, x + r, z + r);
       let moved = false;
       for (const c of cs) {
-        if (c.bottom >= headY - 0.05) continue;
+        if (c.camOnly || c.bottom >= headY - 0.05) continue;
         let top = c.top;
         if (c.type === 'ramp') {
           const s = this.surfaceAt(c, x, z, r);
           top = s === -Infinity ? c.top : s;
         }
-        if (top <= footY + stepUp) continue;
+        // only walkable tops can be stepped onto; anything else pushes until the feet clear it
+        if (top <= footY + (c.walkable ? stepUp : 0.02)) continue;
         let px = 0, pz = 0;
         if (c.type === 'cyl') {
           const dx = x - c.x, dz = z - c.z;
@@ -214,7 +218,7 @@ export class Physics {
     const ex = ox + dx * maxD, ez = oz + dz * maxD;
     const cs = this.query(Math.min(ox, ex) - 0.5, Math.min(oz, ez) - 0.5, Math.max(ox, ex) + 0.5, Math.max(oz, ez) + 0.5);
     for (const c of cs) {
-      if (opts.cam && !c.blockCam) continue;
+      if (opts.cam ? !c.blockCam : c.camOnly) continue;
       if (opts.ignore && opts.ignore === c) continue;
       let t;
       if (c.type === 'cyl') t = rayCyl(ox, oy, oz, dx, dy, dz, c);
@@ -340,27 +344,17 @@ export class Body {
       if (vn < 0) { v.x -= vn * res.nx; v.z -= vn * res.nz; }
     }
     // ground rise check (heightfield cliffs, ledges of the ground function)
-    const moved = (nx - p.x) * (nx - p.x) + (nz - p.z) * (nz - p.z) > 1e-12;
-    if (moved) {
-      const g = P.groundAt(nx, nz, p.y, this.stepUp, this._g);
-      let blocked = g.h > p.y + this.stepUp + 0.001;
-      if (!blocked && g.c === null && this.grounded) {
-        // slope limit on heightfield when walking uphill
-        const n = P.ground.normal(nx, nz, P._n);
-        if (n.y < this.slopeLimit && g.h > p.y + 0.02) blocked = true;
-      }
-      if (blocked) {
+    const mdx = nx - p.x, mdz = nz - p.z;
+    const ml = Math.hypot(mdx, mdz);
+    if (ml > 1e-6) {
+      const rise = this._rise(nx, nz, mdx / ml, mdz / ml);
+      if (rise !== null) {
         this.hitWall = true;
-        if (g.h > this.wallTop) this.wallTop = g.h;
+        if (rise > this.wallTop) this.wallTop = rise;
         // try sliding along each axis
-        const gx = P.groundAt(nx, p.z, p.y, this.stepUp, this._g).h;
-        const okX = gx <= p.y + this.stepUp + 0.001 && !(this.grounded && P.ground.normal(nx, p.z, P._n).y < this.slopeLimit && gx > p.y + 0.02);
-        if (okX) { nz = p.z; }
-        else {
-          const gz = P.groundAt(p.x, nz, p.y, this.stepUp, this._g).h;
-          const okZ = gz <= p.y + this.stepUp + 0.001 && !(this.grounded && P.ground.normal(p.x, nz, P._n).y < this.slopeLimit && gz > p.y + 0.02);
-          if (okZ) nx = p.x; else { nx = p.x; nz = p.z; }
-        }
+        if (Math.abs(mdx) > 1e-6 && this._rise(nx, p.z, Math.sign(mdx), 0) === null) nz = p.z;
+        else if (Math.abs(mdz) > 1e-6 && this._rise(p.x, nz, 0, Math.sign(mdz)) === null) nx = p.x;
+        else { nx = p.x; nz = p.z; }
         const dxm = nx - (p.x + v.x * dt), dzm = nz - (p.z + v.z * dt);
         const l = Math.hypot(dxm, dzm);
         if (l > 1e-6) { this.wallNX = dxm / l; this.wallNZ = dzm / l; }
@@ -398,5 +392,19 @@ export class Body {
         v.x += n.x * 18 * dt; v.z += n.z * 18 * dt;
       }
     }
+  }
+
+  // terrain rise that blocks moving to (x,z) along (ux,uz): too high to step onto, or too steep uphill.
+  // The body's leading edge is probed as well so the capsule stops before sinking into cliffs.
+  _rise(x, z, ux, uz) {
+    const P = this.physics, y = this.pos.y;
+    for (let i = 0; i < 2; i++) {
+      const k = i === 0 ? 0 : this.radius * 0.85;
+      const qx = x + ux * k, qz = z + uz * k;
+      const g = P.groundAt(qx, qz, y, this.stepUp, this._g);
+      if (g.h > y + this.stepUp + 0.001) return g.h;
+      if (this.grounded && g.c === null && g.h > y + 0.02 && P.ground.normal(qx, qz, P._n).y < this.slopeLimit) return g.h;
+    }
+    return null;
   }
 }

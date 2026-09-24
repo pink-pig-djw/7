@@ -28,7 +28,8 @@ export class NPC {
     this.hunch = !!o.hunch;
     this.hidden = false;
     this.col = null;
-    if (o.physics) this.col = o.physics.addCyl(this.pos.x, this.pos.z, 0.45, this.pos.y, this.pos.y + 1.7, { dynamic: true, blockCam: false });
+    this.colR = o.colRadius || 0.45;
+    if (o.physics) this.col = o.physics.addCyl(this.pos.x, this.pos.z, this.colR, this.pos.y, this.pos.y + 1.7, { dynamic: true, blockCam: false, walkable: false });
     this.avatar.root.position.copy(this.pos);
     this.avatar.root.rotation.y = this.facing;
     this.bubble = null;
@@ -37,7 +38,12 @@ export class NPC {
     this.pos.copy(p); this.home.copy(p);
     if (yaw !== null) { this.facing = yaw; this.baseYaw = yaw; }
     this.avatar.root.position.copy(p);
-    if (this.col) { this.col.x = p.x; this.col.z = p.z; this.col.bottom = p.y; this.col.top = p.y + 1.7; this.col.minX = p.x - 0.45; this.col.maxX = p.x + 0.45; this.col.minZ = p.z - 0.45; this.col.maxZ = p.z + 0.45; }
+    if (this.col) this.syncCol();
+  }
+  syncCol() {
+    const c = this.col, p = this.pos, r = this.colR;
+    c.x = p.x; c.z = p.z; c.bottom = p.y; c.top = p.y + 1.7;
+    c.minX = p.x - r; c.maxX = p.x + r; c.minZ = p.z - r; c.maxZ = p.z + r;
   }
   setHidden(v) { this.hidden = v; this.avatar.root.visible = !v; if (this.col) this.col.enabled = !v; }
   canInteract() { return !this.hidden && !!this.talkFn; }
@@ -114,10 +120,6 @@ export class NPC {
     this.avatar.animate(dt, { mode, speed, lookYaw, lookPitch, hunch: this.hunch });
     this.avatar.root.position.copy(this.pos);
     this.avatar.root.rotation.y = this.facing;
-    if (this.col) {
-      this.col.x = this.pos.x; this.col.z = this.pos.z;
-      this.col.minX = this.pos.x - 0.45; this.col.maxX = this.pos.x + 0.45; this.col.minZ = this.pos.z - 0.45; this.col.maxZ = this.pos.z + 0.45;
-      this.col.bottom = this.pos.y; this.col.top = this.pos.y + 1.7;
-    }
+    if (this.col) this.syncCol();
   }
 }

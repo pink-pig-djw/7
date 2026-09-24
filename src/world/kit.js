@@ -173,6 +173,11 @@ export function house(B, phys, spec) {
       const u = -w / 2 + bayW * (b + 0.5);
       if (side === 1 && b === doorBay && spec.door !== false) {
         doorPiece(B, F0, u, { color: r.pick([0x6b4630, 0x5a3a28, 0x3d5a6b, 0x7a3a2a]) });
+        if (phys) {
+          // the door step (house-local (u, d/2 + 0.35)) is a real step, not decoration
+          const lz = d / 2 + 0.35, c = Math.cos(ry), sn = Math.sin(ry);
+          phys.addBox(x + u * c + lz * sn, by + 0.08, z - u * sn + lz * c, 0.98, 0.08, 0.3, ry);
+        }
       } else if (r.chance(0.8)) {
         windowPiece(B, F0, u, 0.95, { w: 0.9, h: 1.2, shutter: null, frame: stoneC, arch: true, rng: r });
       }
@@ -372,6 +377,14 @@ export function column(B, x, y, z, { r = 0.45, h = 6, color = 0xf0ebe0, mat = 'm
   }
 }
 
+// colliders for column(): the shaft up to its (possibly broken) top plus the square plinth, whose
+// corners reach well past the shaft
+export function columnColliders(phys, x, y, z, { r = 0.45, h = 6, broken = 0 } = {}) {
+  const hh = broken > 0 ? h * (1 - broken) : h;
+  phys.addCyl(x, z, r * 1.2, y, y + hh);
+  phys.addBox(x, y + 0.175, z, r * 1.3, 0.175, r * 1.3, 0);
+}
+
 // Market stall with striped awning
 export function stall(B, phys, { x, z, ry = 0, w = 3.2, d = 2.2, awning = 'awningRed', wood = 0x7a5236, goods = 'fruit', seed = 1 }) {
   const r = new RNG(seed);
@@ -405,7 +418,8 @@ export function stall(B, phys, { x, z, ry = 0, w = 3.2, d = 2.2, awning = 'awnin
       B.add('plain', new THREE.IcosahedronGeometry(0.09, 1), L(W, gx + r.range(-0.22, 0.22), 1.22 + r.range(0, 0.08), 0.2 + r.range(-0.15, 0.15)), c);
     }
   }
-  if (phys) phys.addBox(x + Math.sin(ry) * 0.2, 0.5, z + Math.cos(ry) * 0.2, w / 2, 0.5, d * 0.35, ry, {});
+  // whole footprint incl. the corner posts, up to the awning; the counter isn't a platform
+  if (phys) phys.addBox(x, 1.2, z, w / 2 + 0.02, 1.2, d / 2 + 0.02, ry, { walkable: false });
 }
 
 // arched stone bridge along local z
@@ -433,6 +447,12 @@ export function bridge(B, phys, { x, z, ry = 0, len = 10, w = 5, deckY = 0.6, ar
     for (const s of [-1, 1]) {
       const ox = s * (w / 2 - 0.25);
       phys.addBox(x + ox * c, deckY + parapet / 2, z - ox * sn, 0.25, parapet / 2, len / 2, ry, { walkable: false });
+    }
+    // under the deck only the middle of the arch is clear: the haunches (spandrel walls + low vault) are solid
+    const clear = rr * 0.6, hz = (len / 2 - clear) / 2, bot = baseY - 1, topY = deckY - 0.8;
+    for (const s of [-1, 1]) {
+      const oz = s * (clear + hz);
+      phys.addBox(x + oz * sn, (bot + topY) / 2, z + oz * c, w / 2, (topY - bot) / 2, hz, ry, { walkable: false, blockCam: false });
     }
   }
 }

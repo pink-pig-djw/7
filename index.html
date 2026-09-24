@@ -79,6 +79,13 @@ button{font:inherit;color:inherit;cursor:pointer}
 #marker .dist{position:absolute;left:-30px;top:14px;width:60px;text-align:center;font-size:12px;color:#fff6d8;text-shadow:0 1px 3px #000}
 #marker .arrow{position:absolute;left:-7px;top:-24px;width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-bottom:10px solid #fff1bf;opacity:0}
 #marker.edge .arrow{opacity:1}
+#aim{position:absolute;width:0;height:0}
+#aim .ring{position:absolute;left:-16px;top:-16px;width:32px;height:32px;border-radius:50%;border:2px solid rgba(191,248,238,.9);
+  box-shadow:0 0 10px rgba(127,232,216,.75),inset 0 0 8px rgba(127,232,216,.35);animation:aimspin 2.6s linear infinite;transition:opacity .2s}
+#aim .ring::before,#aim .ring::after{content:"";position:absolute;left:50%;width:2px;height:7px;margin-left:-1px;border-radius:1px;background:#dffcf6}
+#aim .ring::before{top:-6px}#aim .ring::after{bottom:-6px}
+#aim.cool .ring{opacity:.35}
+@keyframes aimspin{to{transform:rotate(360deg)}}
 #area-title{position:absolute;left:0;right:0;top:19%;text-align:center;opacity:0;transition:opacity 1.2s}
 #area-title.show{opacity:1}
 #area-title .a1{font-family:var(--font-title);font-size:54px;letter-spacing:.35em;color:#fffaf0;text-shadow:0 2px 12px rgba(0,0,0,.55)}
@@ -173,6 +180,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     <svg id="stamina" viewBox="0 0 54 54"><circle cx="27" cy="27" r="22" fill="rgba(10,20,10,.35)" stroke="rgba(10,20,10,.55)" stroke-width="7"/><circle id="stamina-ring" cx="27" cy="27" r="22" fill="none" stroke="#8be36b" stroke-width="7" stroke-dasharray="138.2" stroke-dashoffset="0" transform="rotate(-90 27 27)"/></svg>
     <div id="prompt" class="hidden"><span class="k">E</span><span class="t"></span></div>
     <div id="marker" class="hidden"><div class="arrow"></div><div class="d"></div><div class="dist"></div></div>
+    <div id="aim" class="hidden"><div class="ring"></div></div>
     <div id="area-title"><div class="a1"></div><div class="line"></div><div class="a2"></div></div>
     <div id="toast"></div>
     <div id="keys-hint"></div>
@@ -195,8 +203,9 @@ button{font:inherit;color:inherit;cursor:pointer}
     <button class="mbtn" id="btn-continue">继续游戏</button>
     <button class="mbtn" id="btn-help">操作说明</button>
     <button class="mbtn" id="btn-settings">设置</button>
+    <button class="mbtn fs-btn" id="btn-fullscreen">全屏模式</button>
   </div>
-  <div class="foot">第三人称 3D 奇幻冒险 · 探索 / 战斗 / 解谜 Demo<br>建议使用 Chrome / Edge 浏览器全屏游玩（F11）</div>
+  <div class="foot">第三人称 3D 奇幻冒险 · 探索 / 战斗 / 解谜 Demo<br>建议使用 Chrome / Edge 浏览器全屏游玩（按 F2 或点「全屏模式」）</div>
 </div>
 
 <div id="pause" class="overlay hidden"><div class="panel">
@@ -205,6 +214,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     <button class="mbtn" id="p-resume">继续游戏</button>
     <button class="mbtn" id="p-help">操作说明</button>
     <button class="mbtn" id="p-settings">设置</button>
+    <button class="mbtn fs-btn" id="p-fullscreen">全屏模式</button>
     <button class="mbtn" id="p-respawn">回到检查点</button>
     <button class="mbtn" id="p-title">返回标题</button>
   </div>
@@ -224,13 +234,15 @@ button{font:inherit;color:inherit;cursor:pointer}
     <div class="k">E</div><div class="v">交谈 / 调查 / 拾取 · 攀爬时松手</div>
     <div class="k">靠近藤蔓墙 + W</div><div class="v">攀爬（藤蔓覆盖的墙面）</div>
     <div class="k">Esc</div><div class="v">暂停菜单</div>
+    <div class="k">F2</div><div class="v">全屏 / 退出全屏</div>
   </div>
-  <div class="muted">风之符文可以：激活古代机关 · 推动石块 · 转动风车 · 驱散瘴雾与荆棘 · 击退敌人 · 显现隐藏的符文。<br>黑紫色的「怨灵」无法被剑伤害，只能用风吹散。</div>
+  <div class="muted">风之符文可以：激活古代机关 · 推动石块 · 转动风车 · 驱散瘴雾与荆棘 · 击退敌人 · 显现隐藏的符文。<br>风会朝镜头正前方吹出；准星附近有可作用的目标时，目标上会出现青色光圈，风会自动对准它。<br>黑紫色的「怨灵」无法被剑伤害，只能用风吹散。</div>
   <button class="back" data-close="help">返 回</button>
 </div></div>
 
 <div id="settings" class="overlay hidden"><div class="panel">
   <h2>设 置</h2>
+  <div class="set-row"><span>全屏（F2）</span><div class="seg" id="set-fullscreen"><button data-v="0">关</button><button data-v="1">开</button></div></div>
   <div class="set-row"><span>画质</span><div class="seg" id="set-quality"><button data-v="low">低</button><button data-v="medium">中</button><button data-v="high">高</button></div></div>
   <div class="set-row"><span>鼠标灵敏度</span><input type="range" id="set-sens" min="0.3" max="2.5" step="0.05"></div>
   <div class="set-row"><span>反转 Y 轴</span><div class="seg" id="set-invert"><button data-v="0">关</button><button data-v="1">开</button></div></div>

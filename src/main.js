@@ -33,13 +33,23 @@ async function boot() {
     progress(0.97, '点亮灯火……');
     await nextFrame();
     // warm up shaders for every zone
+    game.warming = true;
     for (const z of Object.values(game.zones)) {
       game.setZone(z.id);
+      // compile the enemy shaders as well; the first real visit respawns them from the loaded save
+      if (z.spawnEnemies) z.spawnEnemies();
       game.camera.position.set(0, 10, 30);
       game.camera.lookAt(0, 0, 0);
       engine.render(z.scene, game.camera, 0);
+      // build programs for everything out of that view too (same target as the real scene pass)
+      try {
+        engine.renderer.setRenderTarget(engine.targets.main);
+        engine.renderer.compile(z.scene, game.camera);
+      } catch (e) { /* warm-up only */ }
+      engine.renderer.setRenderTarget(null);
       await nextFrame();
     }
+    game.warming = false;
   } catch (e) { fail(e); return; }
   progress(1, '');
   loading.style.opacity = 0;

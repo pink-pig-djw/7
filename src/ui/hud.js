@@ -3,6 +3,7 @@ import * as THREE from 'three';
 
 const $ = (id) => document.getElementById(id);
 const _v = new THREE.Vector3();
+const _f = new THREE.Vector3();
 
 const HEART_PATH = 'M16 28 C 6 20, 1 14, 1 9 C 1 4.5, 4.8 1.5, 8.6 1.5 C 11.6 1.5, 14.2 3.3, 16 6 C 17.8 3.3, 20.4 1.5, 23.4 1.5 C 27.2 1.5, 31 4.5, 31 9 C 31 14, 26 20, 16 28 Z';
 
@@ -27,6 +28,7 @@ export class Hud {
     this.promptT = this.prompt.querySelector('.t');
     this.promptK = this.prompt.querySelector('.k');
     this.marker = $('marker');
+    this.aim = $('aim');
     this.markerDist = this.marker.querySelector('.dist');
     this.markerArrow = this.marker.querySelector('.arrow');
     this.area = $('area-title');
@@ -130,8 +132,9 @@ export class Hud {
     }
     // hint fade
     if (this.hintT > 0) { this.hintT -= dt; this.keysHint.style.opacity = Math.min(1, this.hintT / 2).toFixed(2); }
-    // objective marker
+    // objective marker + what the wind rune would lock onto
     this.updateMarker();
+    this.updateAim();
     // minimap @ ~20fps
     this.mapT -= dt;
     if (this.mapT <= 0) { this.mapT = 0.05; this.drawMinimap(); }
@@ -171,6 +174,19 @@ export class Hud {
     const d = g.player.pos.distanceTo(tgt);
     this.markerDist.textContent = d > 3 ? Math.round(d) + ' m' : '';
     this.marker.style.opacity = d < 4 ? 0.3 : 1;
+  }
+
+  // lock-on ring over the receiver / enemy the next gust will be aimed at
+  updateAim() {
+    const g = this.game, p = g.player;
+    const ready = g.state.flags.hasRune && g.controlEnabled && !g.cam.cinematic && !g.dialogue.active && (p.state === 'ground' || p.state === 'cast');
+    const tgt = ready ? g.wind.target(p.pos, g.cam.forward(_f)) : null;
+    if (tgt) _v.copy(tgt).project(g.camera);
+    if (!tgt || _v.z > 1 || Math.abs(_v.x) > 1.02 || Math.abs(_v.y) > 1.02) { this.aim.classList.add('hidden'); return; }
+    const x = (_v.x * 0.5 + 0.5) * window.innerWidth, y = (-_v.y * 0.5 + 0.5) * window.innerHeight;
+    this.aim.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+    this.aim.classList.remove('hidden');
+    this.aim.classList.toggle('cool', p.runeCD > 0);
   }
 
   drawMinimap() {
